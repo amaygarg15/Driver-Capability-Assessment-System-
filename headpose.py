@@ -53,7 +53,53 @@ while True:
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = face_mesh.process(rgb)
 
-#to add face landmark and head position logic 
+    if results.multi_face_landmarks:
+        for face_landmarks in results.multi_face_landmarks:
+            pts = []
+            for idx in LM_POINTS:
+                lm = face_landmarks.landmark[idx]
+                pts.append([lm.x * w, lm.y * h])
+            pts = np.array(pts, dtype=np.float64)
+
+            focal_length = w
+            cam_matrix = np.array([[focal_length, 0, w/2],
+                                    [0, focal_length, h/2],
+                                    [0, 0, 1]])
+            dist_coeffs = np.zeros((4,1))
+
+            success, rvec, tvec = cv2.solvePnP(model_points, pts, cam_matrix, dist_coeffs)
+            rot_mat, _ = cv2.Rodrigues(rvec)
+            sy = np.sqrt(rot_mat[0,0]**2 + rot_mat[1,0]**2)
+            yaw = np.degrees(np.arctan2(rot_mat[2,1], rot_mat[2,2]))
+            pitch = np.degrees(np.arctan2(-rot_mat[2,0], sy))
+            roll = np.degrees(np.arctan2(rot_mat[1,0], rot_mat[0,0]))
+
+            yaw_history.append(yaw)
+            pitch_history.append(pitch)
+            smoothed_yaw = sum(yaw_history) / len(yaw_history)
+            smoothed_pitch = sum(pitch_history) / len(pitch_history)
+
+            if recalibrating:
+                calibration_yaw.append(smoothed_yaw)
+                calibration_pitch.append(smoothed_pitch)
+                remaining = CALIBRATION_FRAMES - len(calibration_yaw)
+                if remaining <= 0:
+                    baseline_yaw = float(np.mean(calibration_yaw))
+                    baseline_pitch = float(np.mean(calibration_pitch))
+                    recalibrating = False
+                    status = "On Road"
+                else:
+                    cv2.putText(frame, f"Calibrating: {remaining}", (20, 170),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,200,255), 2)
+
+            if baseline_yaw is not None:
+                yaw_dev = smoothed_yaw - baseline_yaw
+                pitch_dev = smoothed_pitch - baseline_pitch
+                looking_forward = abs(yaw_dev) < yaw_threshold and abs(pitch_dev) < pitch_threshold
+            else:
+                yaw_dev = 0.0
+                pitch_dev = 0.0
+                looking_forward = False
 
     cv2.imshow("Head Pose Tracking", frame)
     key = cv2.waitKey(1) & 0xFF
