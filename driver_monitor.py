@@ -97,3 +97,31 @@ VERTICAL_UP_THRESH = 0.06    # How much iris moves up from baseline
 VERTICAL_DOWN_THRESH = 0.06  # How much iris moves down from baseline  
 HORIZONTAL_THRESH = 0.08     # How much iris moves left/right from baseline
 
+# Head pose
+yaw_history = deque(maxlen=5)
+pitch_history = deque(maxlen=5)
+head_calibration_yaw = []
+head_calibration_pitch = []
+head_baseline_yaw = None
+head_baseline_pitch = None
+head_recalibrating = True
+off_road_start = None
+head_status = "Calibrating"
+
+# Helper Functions 
+
+def eye_aspect_ratio(eye):
+    A = dist.euclidean(eye[1], eye[5])
+    B = dist.euclidean(eye[2], eye[4])
+    C = dist.euclidean(eye[0], eye[3])
+    return (A + B) / (2.0 * C)
+
+def mouth_aspect_ratio(mouth):
+    A = dist.euclidean(mouth[2], mouth[10])
+    B = dist.euclidean(mouth[4], mouth[8])
+    C = dist.euclidean(mouth[0], mouth[6])
+    return (A + B) / (2.0 * C)
+
+def iris_center(landmarks, iris_indices, w, h):
+    pts = np.array([[landmarks[i].x, landmarks[i].y] for i in iris_indices])
+    return pts.mean(axis=0), pts
