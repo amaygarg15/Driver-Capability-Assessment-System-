@@ -217,3 +217,69 @@ while True:
                     cv2.putText(frame, f"V:{v_dev:.3f} H:{h_dev:.3f}", (w - 180, 30),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
+                # Draw iris circles
+                for iris_pts in [left_iris_pts, right_iris_pts]:
+                    iris_pixel = np.array([[int(p[0] * w), int(p[1] * h)] for p in iris_pts])
+                    (cx, cy), radius = cv2.minEnclosingCircle(iris_pixel)
+                    cv2.circle(frame, (int(cx), int(cy)), int(radius), (255, 0, 255), 1)
+
+            # Head Pose Detection
+            pts = []
+            for idx in LM_POINTS:
+                lm = landmarks[idx]
+                pts.append([lm.x * w, lm.y * h])
+            pts = np.array(pts, dtype=np.float64)
+
+            focal_length = w
+            cam_matrix = np.array([[focal_length, 0, w/2],
+                                   [0, focal_length, h/2],
+                                   [0, 0, 1]])
+            dist_coeffs = np.zeros((4, 1))
+
+            success, rvec, tvec = cv2.solvePnP(model_points, pts, cam_matrix, dist_coeffs)
+            rot_mat, _ = cv2.Rodrigues(rvec)
+            sy = np.sqrt(rot_mat[0, 0]**2 + rot_mat[1, 0]**2)
+            yaw = np.degrees(np.arctan2(rot_mat[2, 1], rot_mat[2, 2]))
+            pitch = np.degrees(np.arctan2(-rot_mat[2, 0], sy))
+
+            yaw_history.append(yaw)
+            pitch_history.append(pitch)
+            smoothed_yaw = sum(yaw_history) / len(yaw_history)
+            smoothed_pitch = sum(pitch_history) / len(pitch_history)
+
+            if head_recalibrating:
+                head_calibration_yaw.append(smoothed_yaw)
+                head_calibration_pitch.append(smoothed_pitch)
+                remaining = CALIBRATION_FRAMES - len(head_calibration_yaw)
+                if remaining <= 0:
+                    head_baseline_yaw = float(np.mean(head_calibration_yaw))
+                    head_baseline_pitch = float(np.mean(head_calibration_pitch))
+                    head_recalibrating = False
+                    head_status = "On Road"
+
+            if head_baseline_yaw is not None:
+                yaw_dev = smoothed_yaw - head_baseline_yaw
+                pitch_dev = smoothed_pitch - head_baseline_pitch
+                looking_forward = abs(yaw_dev) < YAW_THRESHOLD and abs(pitch_dev) < PITCH_THRESHOLD
+
+                if looking_forward:
+                    off_road_start = None
+                    head_status = "On Road"
+                else:
+                    if off_road_start is None:
+                        off_road_start = time.time()
+                    elif time.time() - off_road_start >= 2.0:
+                        head_status = "Off Road"
+
+                if yaw_dev > YAW_THRESHOLD:
+                    head_direction = "Up"
+                elif yaw_dev < -YAW_THRESHOLD:
+                    head_direction = "Down"
+                elif pitch_dev > PITCH_THRESHOLD:
+                    head_direction = "Left"
+                elif pitch_dev < -PITCH_THRESHOLD:
+                    head_direction = "Right"
+                else:
+                    head_direction = "Forward"
+            else:
+                head_direction = "Calibrating"
