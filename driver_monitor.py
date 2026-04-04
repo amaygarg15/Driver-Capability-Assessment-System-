@@ -125,3 +125,95 @@ def mouth_aspect_ratio(mouth):
 def iris_center(landmarks, iris_indices, w, h):
     pts = np.array([[landmarks[i].x, landmarks[i].y] for i in iris_indices])
     return pts.mean(axis=0), pts
+
+def horizontal_ratio(landmarks, corner_indices, center):
+    left = np.array([landmarks[corner_indices[0]].x, landmarks[corner_indices[0]].y])
+    right = np.array([landmarks[corner_indices[1]].x, landmarks[corner_indices[1]].y])
+    span = right[0] - left[0]
+    if span == 0:
+        return 0.5
+    return (center[0] - left[0]) / span
+
+def vertical_ratio(landmarks, tops, bottoms, center):
+    top_y = min(landmarks[i].y for i in tops)
+    bottom_y = max(landmarks[i].y for i in bottoms)
+    span = bottom_y - top_y
+    if span <= 0:
+        return 0.5
+    return (center[1] - top_y) / span
+
+#Main Loop
+cap = cv2.VideoCapture(0)
+print("Combined Driver Monitor Running...")
+print("Press Q to quit, C to recalibrate head pose, G to recalibrate gaze.")
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    h, w = frame.shape[:2]
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # MediaPipe Processing (Gaze + Head Pose)
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+    mp_results = face_landmarker.detect(mp_image)
+    
+    gaze_direction = "N/A"
+    head_direction = "N/A"
+
+    if mp_results.face_landmarks:
+        for face_landmarks in mp_results.face_landmarks:
+            landmarks = face_landmarks
+
+            # Gaze Detection
+            # Check if iris landmarks exist (indices 468-477)
+            if len(landmarks) > 475:
+                left_center, left_iris_pts = iris_center(landmarks, LEFT_IRIS, w, h)
+                right_center, right_iris_pts = iris_center(landmarks, RIGHT_IRIS, w, h)
+
+                left_h = horizontal_ratio(landmarks, LEFT_EYE_CORNERS, left_center)
+                right_h = horizontal_ratio(landmarks, RIGHT_EYE_CORNERS, right_center)
+                avg_h = (left_h + right_h) / 2.0
+
+                left_v = vertical_ratio(landmarks, LEFT_EYE_TOPS, LEFT_EYE_BOTTOMS, left_center)
+                right_v = vertical_ratio(landmarks, RIGHT_EYE_TOPS, RIGHT_EYE_BOTTOMS, right_center)
+                avg_v = (left_v + right_v) / 2.0
+
+                if smoothed_horizontal is None:
+                    smoothed_horizontal = avg_h
+                    smoothed_vertical = avg_v
+                else:
+                    smoothed_horizontal = gaze_alpha * avg_h + (1 - gaze_alpha) * smoothed_horizontal
+                    smoothed_vertical = gaze_alpha * avg_v + (1 - gaze_alpha) * smoothed_vertical
+
+                # Calibration phase - collect baseline when looking straight
+                if gaze_vertical_baseline is None and len(gaze_vertical_samples) < CALIBRATION_FRAMES:
+                    gaze_vertical_samples.append(smoothed_vertical)
+                    gaze_horizontal_samples.append(smoothed_horizontal)
+                    if len(gaze_vertical_samples) == CALIBRATION_FRAMES:
+                        gaze_vertical_baseline = float(np.mean(gaze_vertical_samples))
+                        gaze_horizontal_baseline = float(np.mean(gaze_horizontal_samples))
+                    gaze_direction = "Calibrating"
+                elif gaze_vertical_baseline is not None:
+                    # Calculate deviation from baseline
+                    v_dev = smoothed_vertical - gaze_vertical_baseline
+                    h_dev = smoothed_horizontal - gaze_horizontal_baseline
+                    
+                    # Prioritize vertical detection (up/down) - critical for phone detection
+                    if v_dev < -VERTICAL_UP_THRESH:
+                        gaze_direction = "DOWN"
+                    elif v_dev > VERTICAL_DOWN_THRESH:
+                        gaze_direction = "UP"
+                    elif h_dev < -HORIZONTAL_THRESH:
+                        gaze_direction = "RIGHT"
+                    elif h_dev > HORIZONTAL_THRESH:
+                        gaze_direction = "LEFT"
+                    else:
+                        gaze_direction = "CENTER"
+                    
+                    # Debug display - show deviation values
+                    cv2.putText(frame, f"V:{v_dev:.3f} H:{h_dev:.3f}", (w - 180, 30),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+
