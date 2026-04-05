@@ -283,3 +283,42 @@ while True:
                     head_direction = "Forward"
             else:
                 head_direction = "Calibrating"
+
+            # Draw head direction arrow
+            nose_3d = model_points[0].reshape(1, 3)
+            nose_3d_forward = (model_points[0] + np.array([0.0, 0.0, 120.0])).reshape(1, 3)
+            nose_2d, _ = cv2.projectPoints(nose_3d, rvec, tvec, cam_matrix, dist_coeffs)
+            nose_forward_2d, _ = cv2.projectPoints(nose_3d_forward, rvec, tvec, cam_matrix, dist_coeffs)
+            p1 = tuple(nose_2d[0].ravel().astype(int))
+            p2 = tuple(nose_forward_2d[0].ravel().astype(int))
+            line_color = (0, 0, 255) if head_status == "Off Road" else (0, 255, 0)
+            cv2.arrowedLine(frame, p1, p2, line_color, 2, tipLength=0.25)
+
+    # Dlib Processing (Drowsiness + Yawn) 
+    drowsy_alert = False
+    yawn_alert = False
+    dlib_rects = dlib_detector(gray, 0)
+
+    for rect in dlib_rects:
+        shape = dlib_predictor(gray, rect)
+        shape_np = face_utils.shape_to_np(shape)
+
+        # Drowsiness Detection
+        leftEye = shape_np[lStart:lEnd]
+        rightEye = shape_np[rStart:rEnd]
+        leftEAR = eye_aspect_ratio(leftEye)
+        rightEAR = eye_aspect_ratio(rightEye)
+        ear = (leftEAR + rightEAR) / 2.0
+
+        if ear < EYE_AR_THRESH:
+            drowsy_counter += 1
+            if drowsy_counter >= EYE_AR_CONSEC_FRAMES:
+                drowsy_alert = True
+        else:
+            drowsy_counter = 0
+
+        # Draw eye contours
+        leftEyeHull = cv2.convexHull(leftEye)
+        rightEyeHull = cv2.convexHull(rightEye)
+        cv2.drawContours(frame, [leftEyeHull], -1, (0, 255, 255), 1)
+        cv2.drawContours(frame, [rightEyeHull], -1, (0, 255, 255), 1)
