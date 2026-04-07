@@ -322,3 +322,57 @@ while True:
         rightEyeHull = cv2.convexHull(rightEye)
         cv2.drawContours(frame, [leftEyeHull], -1, (0, 255, 255), 1)
         cv2.drawContours(frame, [rightEyeHull], -1, (0, 255, 255), 1)
+
+        # Yawn Detection
+        mouth = shape_np[48:68]
+        mar = mouth_aspect_ratio(mouth)
+        if mar > MOUTH_AR_THRESH:
+            yawn_alert = True
+
+        # Draw mouth contour
+        mouthHull = cv2.convexHull(mouth)
+        cv2.drawContours(frame, [mouthHull], -1, (0, 255, 0), 1)
+
+    # Display Status Panel
+    panel_y = 30
+    cv2.putText(frame, f"Gaze: {gaze_direction}", (20, panel_y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+    panel_y += 30
+    cv2.putText(frame, f"Head: {head_direction}", (20, panel_y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 0), 2)
+    panel_y += 30
+    status_color = (0, 0, 255) if head_status == "Off Road" else (0, 255, 0)
+    cv2.putText(frame, f"Road Status: {head_status}", (20, panel_y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.6, status_color, 2)
+    panel_y += 30
+
+    if drowsy_alert:
+        cv2.putText(frame, "DROWSINESS DETECTED!", (20, panel_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+        panel_y += 30
+
+    if yawn_alert:
+        cv2.putText(frame, "YAWNING DETECTED!", (20, panel_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+
+    cv2.imshow("Driver Monitor", frame)
+    key = cv2.waitKey(1) & 0xFF
+    if key == ord('q'):
+        break
+    if key == ord('c'):
+        # Recalibrate head pose
+        head_calibration_yaw.clear()
+        head_calibration_pitch.clear()
+        head_baseline_yaw = None
+        head_baseline_pitch = None
+        head_recalibrating = True
+        head_status = "Calibrating"
+    if key == ord('g'):
+        # Recalibrate gaze
+        gaze_vertical_baseline = None
+        gaze_horizontal_baseline = None
+        gaze_vertical_samples.clear()
+        gaze_horizontal_samples.clear()
+
+cap.release()
+cv2.destroyAllWindows()
